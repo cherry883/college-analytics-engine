@@ -1,0 +1,10 @@
+source_file,student_id,issue,raw_record
+academics,STU1003,Invalid SGPA out of range [0.0 - 10.0],"{'student_id': 'STU1003', 'semester': 2, 'sgpa': 11.0, 'cgpa': 8.15, 'backlogs': 0}"
+academics,STU1008,Invalid CGPA out of range [0.0 - 10.0],"{'student_id': 'STU1008', 'semester': 3, 'sgpa': 9.1, 'cgpa': -1.0, 'backlogs': 0}"
+academics,STU1011,Negative backlogs count,"{'student_id': 'STU1011', 'semester': 2, 'sgpa': 9.22, 'cgpa': 9.41, 'backlogs': -2}"
+attendance,STU1009,Negative total classes,"{'student_id': 'STU1009', 'total_classes': -10, 'attended_classes': 71}"
+attendance,STU1013,Negative attended classes,"{'student_id': 'STU1013', 'total_classes': 100, 'attended_classes': -3}"
+attendance,STU1002,Attended classes exceeds total classes,"{'student_id': 'STU1002', 'total_classes': 70, 'attended_classes': 105}"
+attendance,STU1009,Attended classes exceeds total classes,"{'student_id': 'STU1009', 'total_classes': 0, 'attended_classes': 71}"
+placement,STU1010,Negative package LPA,"{'student_id': 'STU1010', 'is_registered': True, 'offers_count': 2, 'package_lpa': -5.0, 'status': 'Placed'}"
+placement,STU1007,Negative offers count,"{'student_id': 'STU1007', 'is_registered': True, 'offers_count': -1, 'package_lpa': 0.0, 'status': 'Not Placed'}"
