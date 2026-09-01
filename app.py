@@ -1,7 +1,13 @@
+import os
+import io
+import sqlite3
 import pandas as pd
 import streamlit as st
-import requests
 import plotly.express as px
+
+# Import internal modules
+from etl_pipeline import CollegeDataETL
+from database_setup import init_database, save_to_database, DB_NAME
 
 # Page configuration
 st.set_page_config(
@@ -10,7 +16,63 @@ st.set_page_config(
     layout="wide"
 )
 
-API_BASE = "http://127.0.0.1:8000"
+# --- AUTO-INITIALIZE DATABASE ON CLOUD STARTUP ---
+@st.cache_resource
+def bootstrap_database():
+    """Initializes the database and runs the ETL pipeline if DB doesn't exist."""
+    init_database()
+    
+    # Check for available CSVs in the repository
+    student_file = "student_master.csv" if os.path.exists("student_master.csv") else "student_master_2.csv"
+    academics_file = "academics.csv" if os.path.exists("academics.csv") else "academics_2.csv"
+    attendance_file = "attendance.csv" if os.path.exists("attendance.csv") else "attendance_2.csv"
+    placement_file = "placement.csv" if os.path.exists("placement.csv") else "placement_2.csv"
+
+    if all(os.path.exists(f) for f in [student_file, academics_file, attendance_file, placement_file]):
+        df_students = pd.read_csv(student_file)
+        df_academics = pd.read_csv(academics_file)
+        df_attendance = pd.read_csv(attendance_file)
+        df_placement = pd.read_csv(placement_file)
+
+        etl = CollegeDataETL()
+        clean_df, audit_df = etl.integrate_all(
+            df_students, 
+            df_academics, 
+            df_attendance, 
+            df_placement
+        )
+        save_to_database(clean_df, audit_df)
+
+bootstrap_database()
+
+# --- DATABASE QUERY FUNCTIONS (STANDALONE) ---
+def query_db(query: str, params: list = None):
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        if params:
+            return pd.read_sql_query(query, conn, params=params)
+        return pd.read_sql_query(query, conn)
+    except Exception:
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+def get_all_students():
+    return query_db("SELECT * FROM student_360 ORDER BY name ASC;")
+
+def get_overall_toppers():
+    return query_db("SELECT * FROM view_overall_top_performers ORDER BY name ASC;")
+
+def get_branch_toppers(branch: str = None):
+    if branch and branch != "ALL":
+        return query_db("SELECT * FROM view_top_performers_per_branch WHERE branch = ? ORDER BY name ASC;", [branch])
+    return query_db("SELECT * FROM view_top_performers_per_branch ORDER BY branch ASC, name ASC;")
+
+def get_at_risk_students():
+    return query_db("SELECT * FROM view_at_risk_students ORDER BY branch ASC, name ASC;")
+
+def get_department_kpis():
+    return query_db("SELECT * FROM view_department_kpis ORDER BY branch ASC;")
 
 # --- PASTEL SAGE GREEN & WARM EARTHY BROWN THEME ---
 st.markdown("""
@@ -131,15 +193,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def fetch_api(endpoint: str, params: dict = None):
-    try:
-        res = requests.get(f"{API_BASE}{endpoint}", params=params, timeout=5)
-        if res.status_code == 200:
-            return pd.DataFrame(res.json())
-        return pd.DataFrame()
-    except Exception:
-        return pd.DataFrame()
-
 # Sidebar Brand Header
 st.sidebar.markdown("""
 <div style="padding: 10px 0 20px 0;">
@@ -157,14 +210,14 @@ menu = st.sidebar.radio("Navigation", [
 ])
 
 # -------------------------------------------------------------------
-# 1. EXECUTIVE DASHBOARD
+# 1. EXECUTIVE OVERVIEW
 # -------------------------------------------------------------------
 if menu == "🌿 Executive Overview":
     st.markdown('<div class="section-title">Institutional Health & Performance</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-subtitle">Real-time cross-departmental academic indicators and risk diagnostics</div>', unsafe_allow_html=True)
 
-    students_df = fetch_api("/api/students")
-    kpi_df = fetch_api("/api/analytics/kpis")
+    students_df = get_all_students()
+    kpi_df = get_department_kpis()
 
     if not students_df.empty:
         total_students = len(students_df)
@@ -212,7 +265,7 @@ if menu == "🌿 Executive Overview":
 
         st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
-        # Visual Charts with High-Contrast Dark Earthy Labels
+        # High Contrast Charts
         col_chart1, col_chart2 = st.columns(2)
 
         with col_chart1:
@@ -310,7 +363,7 @@ if menu == "🌿 Executive Overview":
         st.markdown("##### 📋 Department KPI Breakdown")
         st.dataframe(kpi_df, use_container_width=True)
     else:
-        st.warning("Backend API is offline. Start FastAPI (`uvicorn api_service:app --reload`).")
+        st.warning("Database empty. Ensure CSV datasets are present in your repository or upload them via the 'Ingest Department Files' tab.")
 
 # -------------------------------------------------------------------
 # 2. OVERALL COLLEGE TOPPERS
@@ -319,7 +372,7 @@ elif menu == "✨ Overall College Toppers":
     st.markdown('<div class="section-title">✨ Institutional Top Performers</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-subtitle">Top 10 academic achievers across the entire college, arranged alphabetically by student name.</div>', unsafe_allow_html=True)
 
-    overall_df = fetch_api("/api/students/top-performers/overall")
+    overall_df = get_overall_toppers()
 
     if not overall_df.empty:
         st.dataframe(
@@ -334,7 +387,7 @@ elif menu == "✨ Overall College Toppers":
             mime="text/csv"
         )
     else:
-        st.warning("No records found. Please ensure database is initialized.")
+        st.warning("No records found.")
 
 # -------------------------------------------------------------------
 # 3. BRANCH-WISE TOPPERS
@@ -343,7 +396,7 @@ elif menu == "📁 Branch-Wise Toppers":
     st.markdown('<div class="section-title">📁 Department Top Performers</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-subtitle">Top 10 students for each individual department, sorted alphabetically by name.</div>', unsafe_allow_html=True)
 
-    top_df = fetch_api("/api/students/top-performers")
+    top_df = get_branch_toppers()
 
     if not top_df.empty:
         branches = sorted(top_df['branch'].unique())
@@ -382,7 +435,7 @@ elif menu == "🔔 Early Warning & Risks":
     st.markdown('<div class="section-title">🔔 Early Warning & Academic Mentorship</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-subtitle">Students requiring intervention due to low attendance (&lt;75%) or academic deficits.</div>', unsafe_allow_html=True)
 
-    risk_df = fetch_api("/api/students/at-risk")
+    risk_df = get_at_risk_students()
 
     if not risk_df.empty:
         st.dataframe(
@@ -410,17 +463,22 @@ elif menu == "📤 Ingest Department Files":
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🚀 Process & Ingest Datasets"):
         if f_master and f_acad and f_att and f_place:
-            files = {
-                "file_students": (f_master.name, f_master.getvalue(), "text/csv"),
-                "file_academics": (f_acad.name, f_acad.getvalue(), "text/csv"),
-                "file_attendance": (f_att.name, f_att.getvalue(), "text/csv"),
-                "file_placement": (f_place.name, f_place.getvalue(), "text/csv")
-            }
             with st.spinner("Executing normalization & validation rules..."):
-                res = requests.post(f"{API_BASE}/api/etl/upload", files=files)
-                if res.status_code == 200:
-                    st.success(f"✨ Successfully integrated {res.json()['processed_students_count']} students!")
-                else:
-                    st.error("ETL processing encountered an issue.")
+                df_students = pd.read_csv(io.BytesIO(f_master.getvalue()))
+                df_academics = pd.read_csv(io.BytesIO(f_acad.getvalue()))
+                df_attendance = pd.read_csv(io.BytesIO(f_att.getvalue()))
+                df_placement = pd.read_csv(io.BytesIO(f_place.getvalue()))
+
+                etl = CollegeDataETL()
+                clean_df, audit_df = etl.integrate_all(
+                    df_students, 
+                    df_academics, 
+                    df_attendance, 
+                    df_placement
+                )
+
+                save_to_database(clean_df, audit_df)
+                st.success(f"✨ Successfully integrated {len(clean_df)} students!")
+                st.experimental_rerun()
         else:
             st.warning("Please upload all four departmental files.")
